@@ -38,6 +38,10 @@ def configuration(parent_package='', top_path=None):
                          sources=['sag_fast.c'],
                          include_dirs=numpy.get_include())
 
+    config.add_extension('tdp',
+                         sources=['tdp.c'],
+                         include_dirs=numpy.get_include())
+
     # add other directories
     config.add_subpackage('tests')
 
