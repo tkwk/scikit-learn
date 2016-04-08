@@ -14,6 +14,7 @@ import numpy.linalg as linalg
 cimport cython
 from cpython cimport bool
 import warnings
+cimport tdp
 
 ctypedef np.float64_t DOUBLE
 ctypedef np.uint32_t UINT32_t
@@ -119,6 +120,7 @@ cdef extern from "cblas.h":
     void dcopy "cblas_dcopy"(int N, double *X, int incX, double *Y, int incY) nogil
     void dscal "cblas_dscal"(int N, double alpha, double *X, int incX) nogil
 
+ctypedef double (*dotprod) (int, double*, int, double*, int) nogil
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -128,7 +130,7 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
                             np.ndarray[DOUBLE, ndim=2, mode='fortran'] X,
                             np.ndarray[DOUBLE, ndim=1, mode='c'] y,
                             int max_iter, double tol,
-                            object rng, bint random=0, bint positive=0):
+                            object rng, bint random=0, bint positive=0, int trimmed=45):
     """Cython version of the coordinate descent algorithm
         for Elastic-Net regression
 
@@ -137,6 +139,15 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
         (1/2) * norm(y - X w, 2)^2 + alpha norm(w, 1) + (beta/2) norm(w, 2)^2
 
     """
+#dot product
+    cdef dotprod myddot = ddot
+
+    if(trimmed != 0):
+        tdp.gNT = trimmed
+        myddot = tdp.tddot
+        print("using trimmed dot product wth NT = ", trimmed)
+#    cdef double grad
+#    cdef double newgrad
 
     # get the data information into easy vars
     cdef unsigned int n_samples = X.shape[0]
@@ -147,6 +158,12 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
 
     # compute norms of the columns of X
     cdef np.ndarray[DOUBLE, ndim=1] norm_cols_X = (X**2).sum(axis=0)
+
+#dot product
+    cdef unsigned int ind
+    with nogil:
+        for ind in range(n_features):
+            norm_cols_X[ind] = myddot(n_samples, <DOUBLE*>(X.data + ind * n_samples * sizeof(DOUBLE)),1,<DOUBLE*>(X.data + ind * n_samples * sizeof(DOUBLE)),1)
 
     # initial value of the residuals
     cdef np.ndarray[DOUBLE, ndim=1] R = np.empty(n_samples)
@@ -177,14 +194,14 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
     with nogil:
         # R = y - np.dot(X, w)
         for i in range(n_samples):
-            R[i] = y[i] - ddot(n_features,
+            R[i] = y[i] - myddot(n_features,
                                <DOUBLE*>(X.data + i * sizeof(DOUBLE)),
                                n_samples, <DOUBLE*>w.data, 1)
 
         # tol *= np.dot(y, y)
-        tol *= ddot(n_samples, <DOUBLE*>y.data, n_tasks,
+        tol *= myddot(n_samples, <DOUBLE*>y.data, n_tasks,
                     <DOUBLE*>y.data, n_tasks)
-
+        
         for n_iter in range(max_iter):
             w_max = 0.0
             d_w_max = 0.0
@@ -206,9 +223,40 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
                           1, <DOUBLE*>R.data, 1)
 
                 # tmp = (X[:,ii]*R).sum()
-                tmp = ddot(n_samples,
+                tmp = myddot(n_samples,
                            <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
                            1, <DOUBLE*>R.data, 1)
+
+#regarder la variation du gradient de f
+#tmp contient (w_old - grad)*||Xii||
+#on s'y place
+#                w[ii] = tmp / (norm_cols_X[ii]+beta)
+#                grad = w[ii] - w_ii
+#
+#                #R -=  w[ii] * X[:,ii] # Update residual
+#                daxpy(n_samples, -w[ii],
+#                      <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
+#                      1, <DOUBLE*>R.data, 1)
+#
+#                newgrad = myddot(n_samples,
+#                           <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
+#                           1, <DOUBLE*>R.data, 1)
+#
+#                #R +=  w[ii] * X[:,ii] # Update residual
+#                daxpy(n_samples, w[ii],
+#                      <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
+#                      1, <DOUBLE*>R.data, 1)
+#
+#                if(fabs(newgrad) > fabs(grad) and fsign(newgrad*grad) > 0):
+#                #when using standard Lasso, this line shoulde never trigger
+#                    
+#                    daxpy(n_samples, -w_ii,
+#                          <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
+#                          1, <DOUBLE*>R.data, 1)
+#                    continue
+#
+########################################
+
 
                 if positive and tmp < 0:
                     w[ii] = 0.0
@@ -239,7 +287,7 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
 
                 # XtA = np.dot(X.T, R) - beta * w
                 for i in range(n_features):
-                    XtA[i] = ddot(
+                    XtA[i] = myddot(
                         n_samples,
                         <DOUBLE*>(X.data + i * n_samples *sizeof(DOUBLE)),
                         1, <DOUBLE*>R.data, 1) - beta * w[i]
@@ -268,7 +316,7 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
                 l1_norm = dasum(n_features, <DOUBLE*>w.data, 1)
 
                 # np.dot(R.T, y)
-                gap += (alpha * l1_norm - const * ddot(
+                gap += (alpha * l1_norm - const * myddot(
                             n_samples,
                             <DOUBLE*>R.data, 1,
                             <DOUBLE*>y.data, n_tasks)
