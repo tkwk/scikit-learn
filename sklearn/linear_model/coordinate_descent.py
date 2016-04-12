@@ -267,18 +267,19 @@ def enet_path_trimmed_Q(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
               check_input=True, NT=0, **params):
     """ compute X^t X and X^t y with NT-trimmed dot product, then proceed to standard enet_path
     """
+    print("Using trimmed Q")
     q = tdp.tdot(X.T,y,NT)
     Q = tdp.tdot(X.T,X,NT)
 
     Q=tdp.project(Q,0.1)
 
-    return enet_path(X, y, l1_ratio, eps, n_alphas, alphas, Q, q, copy_X, coef_init, verbose, return_n_iter, positive, check_input)
+    return enet_path(X, y, l1_ratio, eps, n_alphas, alphas, Q, q, copy_X, coef_init, verbose, return_n_iter, positive, check_input, NT=0)
 
 
 def enet_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
               precompute='auto', Xy=None, copy_X=True, coef_init=None,
               verbose=False, return_n_iter=False, positive=False,
-              check_input=True, **params):
+              check_input=True, NT=0, **params):
     """Compute elastic net path with coordinate descent
 
     The elastic net optimization function varies for mono and multi-outputs.
@@ -474,7 +475,7 @@ def enet_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
         elif precompute is False:
             model = cd_fast.enet_coordinate_descent(
                 coef_, l1_reg, l2_reg, X, y, max_iter, tol, rng, random,
-                positive)
+                positive, trimmed = NT)
         else:
             raise ValueError("Precompute should be one of True, False, "
                              "'auto' or array-like")
@@ -629,7 +630,7 @@ class ElasticNet(LinearModel, RegressorMixin):
     def __init__(self, alpha=1.0, l1_ratio=0.5, fit_intercept=True,
                  normalize=False, precompute=False, max_iter=1000,
                  copy_X=True, tol=1e-4, warm_start=False, positive=False,
-                 random_state=None, selection='cyclic', Xy=None, trimmed=0):
+                 random_state=None, selection='cyclic', Xy=None, trimmed=0, pre_trimmed=0):
         self.alpha = alpha
         self.l1_ratio = l1_ratio
         self.coef_ = None
@@ -646,9 +647,12 @@ class ElasticNet(LinearModel, RegressorMixin):
         self.selection = selection
         self.Xy = Xy
         self.trimmed = trimmed
+        self.pre_trimmed = pre_trimmed
 
-        if(self.trimmed != 0):
-            self.path = lambda *pos,**params : enet_path_trimmed_Q(*pos,**params,NT=self.trimmed)
+        if(self.pre_trimmed != 0):
+            self.path = lambda *pos,**params : enet_path_trimmed_Q(*pos,**params,NT=self.pre_trimmed)
+        elif(self.trimmed != 0):
+            self.path = lambda *pos,**params : enet_path(*pos,**params,NT=self.trimmed)
         else:
             self.path = enet_path
 
@@ -916,15 +920,17 @@ class Lasso(ElasticNet):
     def __init__(self, alpha=1.0, fit_intercept=True, normalize=False,
                  precompute=False, copy_X=True, max_iter=1000,
                  tol=1e-4, warm_start=False, positive=False,
-                 random_state=None, selection='cyclic', Xy=None, trimmed=0):
+                 random_state=None, selection='cyclic', Xy=None, trimmed=0, pre_trimmed=0):
         super(Lasso, self).__init__(
             alpha=alpha, l1_ratio=1.0, fit_intercept=fit_intercept,
             normalize=normalize, precompute=precompute, copy_X=copy_X,
             max_iter=max_iter, tol=tol, warm_start=warm_start,
             positive=positive, random_state=random_state,
-            selection=selection,Xy=Xy,trimmed=trimmed)
-        if(self.trimmed != 0):
-            self.path = lambda *pos,**params : enet_path_trimmed_Q(*pos,**params,NT=self.trimmed)
+            selection=selection,Xy=Xy,trimmed=trimmed,pre_trimmed=pre_trimmed)
+        if(self.pre_trimmed != 0):
+            self.path = lambda *pos,**params : enet_path_trimmed_Q(*pos,**params,NT=self.pre_trimmed)
+        elif(self.trimmed != 0):
+            self.path = lambda *pos,**params : enet_path(*pos,**params,NT=self.trimmed)
         else:
             self.path = enet_path
 

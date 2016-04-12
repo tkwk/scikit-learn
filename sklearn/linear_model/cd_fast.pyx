@@ -130,7 +130,7 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
                             np.ndarray[DOUBLE, ndim=2, mode='fortran'] X,
                             np.ndarray[DOUBLE, ndim=1, mode='c'] y,
                             int max_iter, double tol,
-                            object rng, bint random=0, bint positive=0, int trimmed=45):
+                            object rng, bint random=0, bint positive=0, int trimmed=0):
     """Cython version of the coordinate descent algorithm
         for Elastic-Net regression
 
@@ -139,19 +139,20 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
         (1/2) * norm(y - X w, 2)^2 + alpha norm(w, 1) + (beta/2) norm(w, 2)^2
 
     """
-#dot product
+#definition of the dot product
     cdef dotprod myddot = ddot
-
-    if(trimmed != 0):
-        tdp.gNT = trimmed
-        myddot = tdp.tddot
-        print("using trimmed dot product wth NT = ", trimmed)
-#    cdef double grad
-#    cdef double newgrad
 
     # get the data information into easy vars
     cdef unsigned int n_samples = X.shape[0]
     cdef unsigned int n_features = X.shape[1]
+
+#if we use trimmed dot product:
+    cdef unsigned int ind
+    cdef np.ndarray[np.int32_t, ndim=1] Hindex = np.zeros(trimmed, dtype=np.int32)
+    cdef np.ndarray[DOUBLE, ndim=1] HR = np.zeros(n_features)
+    if(trimmed != 0):
+        tdp.gNT = trimmed
+        myddot = tdp.tddot
 
     # get the number of tasks indirectly, using strides
     cdef unsigned int n_tasks = y.strides[0] / sizeof(DOUBLE)
@@ -159,8 +160,7 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
     # compute norms of the columns of X
     cdef np.ndarray[DOUBLE, ndim=1] norm_cols_X = (X**2).sum(axis=0)
 
-#dot product
-    cdef unsigned int ind
+#recompute ||X||^2 with the choosen dot product
     with nogil:
         for ind in range(n_features):
             norm_cols_X[ind] = myddot(n_samples, <DOUBLE*>(X.data + ind * n_samples * sizeof(DOUBLE)),1,<DOUBLE*>(X.data + ind * n_samples * sizeof(DOUBLE)),1)
@@ -194,9 +194,9 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
     with nogil:
         # R = y - np.dot(X, w)
         for i in range(n_samples):
-            R[i] = y[i] - myddot(n_features,
-                               <DOUBLE*>(X.data + i * sizeof(DOUBLE)),
-                               n_samples, <DOUBLE*>w.data, 1)
+                R[i] = y[i] - myddot(n_features,
+                                    <DOUBLE*>(X.data + i * sizeof(DOUBLE)),
+                                    n_samples, <DOUBLE*>w.data, 1)
 
         # tol *= np.dot(y, y)
         tol *= myddot(n_samples, <DOUBLE*>y.data, n_tasks,
@@ -216,6 +216,11 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
 
                 w_ii = w[ii]  # Store previous value
 
+#we store the current R in HR
+                if(trimmed != 0):
+                    for ind in range(n_samples):
+                        HR[ind] = R[ind]
+
                 if w_ii != 0.0:
                     # R += w_ii * X[:,ii]
                     daxpy(n_samples, w_ii,
@@ -223,40 +228,15 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
                           1, <DOUBLE*>R.data, 1)
 
                 # tmp = (X[:,ii]*R).sum()
-                tmp = myddot(n_samples,
-                           <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
-                           1, <DOUBLE*>R.data, 1)
-
-#regarder la variation du gradient de f
-#tmp contient (w_old - grad)*||Xii||
-#on s'y place
-#                w[ii] = tmp / (norm_cols_X[ii]+beta)
-#                grad = w[ii] - w_ii
-#
-#                #R -=  w[ii] * X[:,ii] # Update residual
-#                daxpy(n_samples, -w[ii],
-#                      <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
-#                      1, <DOUBLE*>R.data, 1)
-#
-#                newgrad = myddot(n_samples,
-#                           <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
-#                           1, <DOUBLE*>R.data, 1)
-#
-#                #R +=  w[ii] * X[:,ii] # Update residual
-#                daxpy(n_samples, w[ii],
-#                      <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
-#                      1, <DOUBLE*>R.data, 1)
-#
-#                if(fabs(newgrad) > fabs(grad) and fsign(newgrad*grad) > 0):
-#                #when using standard Lasso, this line shoulde never trigger
-#                    
-#                    daxpy(n_samples, -w_ii,
-#                          <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
-#                          1, <DOUBLE*>R.data, 1)
-#                    continue
-#
-########################################
-
+                if(trimmed == 0):
+                    tmp = myddot(n_samples,
+                                <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
+                                1, <DOUBLE*>R.data, 1)
+                else:
+#we do the trimmed dot product and we keep track of the "corrupted" indexes
+                    tmp = tdp.tddot_index(n_samples,
+                                <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
+                                1, <DOUBLE*>R.data, 1, <int *>(Hindex.data))
 
                 if positive and tmp < 0:
                     w[ii] = 0.0
@@ -269,8 +249,12 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
                     daxpy(n_samples, -w[ii],
                           <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
                           1, <DOUBLE*>R.data, 1)
+#we restore the previous value of R on the corrupted indexes
+                if(trimmed != 0):
+                    for ind in range(trimmed):
+                        R[Hindex[ind]] = HR[Hindex[ind]]
 
-                # update the maximum absolute coefficient update
+               # update the maximum absolute coefficient update
                 d_w_ii = fabs(w[ii] - w_ii)
                 if d_w_ii > d_w_max:
                     d_w_max = d_w_ii
@@ -281,6 +265,12 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
             if (w_max == 0.0
                     or d_w_max / w_max < d_w_tol
                     or n_iter == max_iter - 1):
+
+#if we use the trimmed dot product, quit when DeltaW < epsilon
+                if trimmed !=0 :
+                    gap = 0.0 #pour que sci-kit learn ne lance pas un warning de non convergence
+                    break
+
                 # the biggest coordinate update of this iteration was smaller
                 # than the tolerance: check the duality gap as ultimate
                 # stopping criterion

@@ -9,7 +9,7 @@ from libc.stdlib cimport malloc, free
 from libc.stdlib cimport qsort
 
 cdef double * Hbuffer = NULL
-cdef int * Hindex = NULL
+cdef int * Hind = NULL
 cdef int Hsize = 0
 cdef int gNT = 0
 
@@ -36,6 +36,9 @@ cdef double cvtdot(double * X1, double * X2, int N, int NT) nogil:
 cdef double tddot(int N, double * X1, int incx, double * X2, int incy) nogil:
     return ptddot(N,X1,incx,X2,incy,gNT)
 
+cdef double tddot_index(int N, double * X1, int incx, double * X2, int incy, int * index) nogil:
+    return ptddot(N,X1,incx,X2,incy,gNT,index)
+
 cdef int compare_ints(const void * x, const void * y) nogil:
     if(((<int *>x)[0]) < ((<int *>y)[0])):
         return -1
@@ -54,6 +57,77 @@ cdef int compare_doubles(const void * x, const void * y) nogil:
     elif(vabs((<double *>x)[0]) > vabs((<double *>y)[0])):
         return 1
     return 0
+
+cdef void trimm(int N, double * X, int incx, int NT) nogil:
+    global Hbuffer, Hsize, Hind
+#on ajuste la taille du buffer si necessaire
+    if(NT > Hsize):
+        if(Hbuffer != NULL):
+            free(Hbuffer)
+        Hbuffer = <double *> malloc(sizeof(double)*NT)
+
+    if(NT > Hsize):
+        if(Hind != NULL):
+            free(Hind)
+        Hind = <int *> malloc(sizeof(int)*NT)
+    
+    cdef int * Hindex
+    Hindex = Hind
+
+    cdef double dot = 0.0
+    cdef int i
+    cdef double val = 0.0
+    cdef int index
+    cdef int offset
+    cdef int end = NT-1
+    cdef int cpNT = NT
+
+    for i in range(NT):
+        Hbuffer[i] = 0.0
+
+    for i in range(N):
+        if( (not isfinite(X[i*incx])) ):
+            if(NT==0):
+                break
+            insert(Hbuffer,end,0.0)
+            int_insert(Hindex,end,i)
+            end -= 1
+            NT -= 1
+            continue
+        val = (X[i*incx])
+        if (NT>0 and vabs(val) > vabs(Hbuffer[0])):
+#insertion de val dans HBuffer
+            if(vabs(val) >= vabs(Hbuffer[end])):
+                insert(Hbuffer,end,val)
+                int_insert(Hindex,end,i)
+            else:
+#recherche de l'index a inserer par dichotomie
+                index = (NT+1)//2
+                offset = index
+                while(True):
+                    if(index >= NT):
+                        index = NT-1
+                    if(index <= 0):
+                        index = 1
+                    if(vabs(Hbuffer[index-1]) <= vabs(val) and vabs(val) <= vabs(Hbuffer[index])):
+                        insert(Hbuffer,index-1,val)
+                        int_insert(Hindex,index-1,i)
+                        break
+                    offset = (offset+1)//2
+                    if(vabs(val) > vabs(Hbuffer[index])):
+                        index += offset
+                    else:
+                        index -= offset
+
+    qsort(Hindex,cpNT,sizeof(int),compare_ints)
+    cdef int count = 0
+    for i in range(N):
+        if(count >= cpNT or i!=Hindex[count]):
+            pass
+        else:
+            X[i*incx] = 0.0
+            count += 1
+
 
 cdef double oldptddot(int N, double * X1, int incx, double * X2, int incy, int NT) nogil:
     global Hbuffer, Hsize
@@ -74,8 +148,8 @@ cdef double oldptddot(int N, double * X1, int incx, double * X2, int incy, int N
 
     return dot
 
-cdef double ptddot(int N, double * X1, int incx, double * X2, int incy, int NT) nogil:
-    global Hbuffer, Hsize, Hindex
+cdef double ptddot(int N, double * X1, int incx, double * X2, int incy, int NT, int * iarray = NULL) nogil:
+    global Hbuffer, Hsize, Hind
 #on ajuste la taille du buffer si necessaire
     if(NT > Hsize):
         if(Hbuffer != NULL):
@@ -83,9 +157,15 @@ cdef double ptddot(int N, double * X1, int incx, double * X2, int incy, int NT) 
         Hbuffer = <double *> malloc(sizeof(double)*NT)
 
     if(NT > Hsize):
-        if(Hindex != NULL):
-            free(Hindex)
-        Hindex = <int *> malloc(sizeof(int)*NT)
+        if(Hind != NULL):
+            free(Hind)
+        Hind = <int *> malloc(sizeof(int)*NT)
+    
+    cdef int * Hindex
+    if(iarray == NULL):
+        Hindex = Hind
+    else:
+        Hindex = iarray
 #calcul du produit scalaire
     cdef double dot = 0.0
     cdef int i
@@ -131,11 +211,7 @@ cdef double ptddot(int N, double * X1, int incx, double * X2, int incy, int NT) 
                         index += offset
                     else:
                         index -= offset
-        #dot += val
 
-    #on soustrait a dot les NT valeurs les plus grosses
-    #for i in range(NT):
-    #    dot -= Hbuffer[i]
     qsort(Hindex,cpNT,sizeof(int),compare_ints)
     cdef int count = 0
     for i in range(N):
