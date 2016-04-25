@@ -223,6 +223,17 @@ cdef double ptddot(int N, double * X1, int incx, double * X2, int incy, int NT, 
     return dot
 
     
+def trimmaux(cnp.ndarray[double,ndim=1] X, int NT):
+    trimm(X.shape[0],<double *> X.data, 1, NT)
+
+def trimmed(X,NT):
+    if(len(X.shape)==1):
+        trimmaux(X,NT)
+    else:
+        X=np.asfortranarray(X)
+        for col in range(X.shape[1]):
+            X[:,col] = trimmed(X[:,col],NT)
+    return X
 
 def tdot(X1,X2,NT):
 #dans le cas ou X2 et à une dimension on le passe en 2D (colonne)
