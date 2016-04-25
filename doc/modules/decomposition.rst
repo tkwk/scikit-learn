@@ -125,7 +125,7 @@ For instance, the following shows 16 sample portraits (centered around
 0.0) from the Olivetti dataset. On the right hand side are the first 16
 singular vectors reshaped as portraits. Since we only require the top
 16 singular vectors of a dataset with size :math:`n_{samples} = 400`
-and :math:`n_{features} = 64 \times 64 = 4096`, the computation time it
+and :math:`n_{features} = 64 \times 64 = 4096`, the computation time is
 less than 1s:
 
 .. |orig_img| image:: ../auto_examples/decomposition/images/plot_faces_decomposition_001.png
@@ -558,7 +558,7 @@ structure of the error covariance :math:`\Psi`:
   :class:`FactorAnalysis`, a classical statistical model. The matrix W is
   sometimes called the "factor loading matrix".
 
-Both model essentially estimate a Gaussian with a low-rank covariance matrix.
+Both models essentially estimate a Gaussian with a low-rank covariance matrix.
 Because both models are probabilistic they can be integrated in more complex
 models, e.g. Mixture of Factor Analysers. One gets very different models (e.g.
 :class:`FastICA`) if non-Gaussian priors on the latent variables are assumed.
