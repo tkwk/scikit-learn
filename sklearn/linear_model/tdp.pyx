@@ -235,6 +235,16 @@ def trimmed(X,NT):
             X[:,col] = trimmed(X[:,col],NT)
     return X
 
+#return an estimation of the non-corrupted norm
+def tnorm(X,NT):
+    N = X.shape[0]
+    return ((N-NT)/N)*linalg.norm(trimmed(X,NT))
+
+#return an estimation of the non-corrupted mean
+def tmean(X,NT):
+    N = X.shape[0]
+    return ((N-NT)/N)*np.mean(trimmed(X,NT))
+
 def tdot(X1,X2,NT):
 #dans le cas ou X2 et à une dimension on le passe en 2D (colonne)
 #dans le cas ou X1 et à une dimension on le passe en 2D (line)
