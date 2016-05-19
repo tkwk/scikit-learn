@@ -261,13 +261,209 @@ def lasso_path(X, y, eps=1e-3, n_alphas=100, alphas=None,
                      positive=positive, return_n_iter=return_n_iter, **params)
 
 
+def C_step(X,Y,H,alpha):
+    lasso = Lasso(alpha=alpha)
+    n = X.shape[0]
+    h = H.shape[0]
+    p = X.shape[1]
+    XH = np.zeros((h,p))
+    YH = np.zeros((h))
+    for i in range(h):
+        XH[i,:] = X[H[i],:]
+        YH[i] = Y[H[i]]
+    lasso.fit(XH,YH)
+    return lasso.coef_
+
+
+def residuals(X,Y,beta):
+    n = X.shape[0]
+    res2 = np.zeros((n))
+    pred = np.dot(X,beta)
+    for i in range(n):
+        res2[i] = (pred[i]-Y[i])*(pred[i]-Y[i])
+    return res2
+
+
+def indexofksmallest(tab,k):
+    return sorted(tab.argsort()[0:k])
+
+def indexofklargest(tab,k):
+    n = tab.shape[0]
+    return sorted(tab.argsort()[n-k:n])
+
+
+def lts_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
+              precompute='auto', Xy=None, copy_X=True, coef_init=None,
+              verbose=False, return_n_iter=False, positive=False,
+              check_input=True, NT=0, **params):
+    """ Sparse LTS algorithm
+    """
+##############################################
+    # We expect X and y to be already float64 Fortran ordered when bypassing
+    # checks
+    if check_input:
+        X = check_array(X, 'csc', dtype=np.float64, order='F', copy=copy_X)
+        y = check_array(y, 'csc', dtype=np.float64, order='F', copy=False,
+                        ensure_2d=False)
+        if Xy is not None:
+            # Xy should be a 1d contiguous array or a 2D C ordered array
+            Xy = check_array(Xy, dtype=np.float64, order='C', copy=False,
+                             ensure_2d=False)
+    n_samples, n_features = X.shape
+
+    multi_output = False
+    if y.ndim != 1:
+        multi_output = True
+        _, n_outputs = y.shape
+
+    # MultiTaskElasticNet does not support sparse matrices
+    if not multi_output and sparse.isspmatrix(X):
+        if 'X_offset' in params:
+            # As sparse matrices are not actually centered we need this
+            # to be passed to the CD solver.
+            X_sparse_scaling = params['X_offset'] / params['X_scale']
+        else:
+            X_sparse_scaling = np.zeros(n_features)
+
+    # X should be normalized and fit already if function is called
+    # from ElasticNet.fit
+    if check_input:
+        X, y, X_offset, y_offset, X_scale, precompute, Xy = \
+            _pre_fit(X, y, Xy, precompute, normalize=False,
+                     fit_intercept=False, copy=False)
+    if alphas is None:
+        # No need to normalize of fit_intercept: it has been done
+        # above
+        alphas = _alpha_grid(X, y, Xy=Xy, l1_ratio=l1_ratio,
+                             fit_intercept=False, eps=eps, n_alphas=n_alphas,
+                             normalize=False, copy_X=False)
+    else:
+        alphas = np.sort(alphas)[::-1]  # make sure alphas are properly ordered
+
+    n_alphas = len(alphas)
+    tol = params.get('tol', 1e-4)
+    max_iter = params.get('max_iter', 1000)
+    dual_gaps = np.empty(n_alphas)
+    n_iters = []
+
+    rng = check_random_state(params.get('random_state', None))
+    selection = params.get('selection', 'cyclic')
+    if selection not in ['random', 'cyclic']:
+        raise ValueError("selection should be either random or cyclic.")
+    random = (selection == 'random')
+
+    if not multi_output:
+        coefs = np.empty((n_features, n_alphas), dtype=np.float64)
+    else:
+        coefs = np.empty((n_outputs, n_features, n_alphas),
+                         dtype=np.float64)
+
+    if coef_init is None:
+        coef_ = np.asfortranarray(np.zeros(coefs.shape[:-1]))
+    else:
+        coef_ = np.asfortranarray(coef_init)
+
+    for i, alpha in enumerate(alphas):
+
+
+
+        max_iter = 100
+
+        n = X.shape[0]
+        h = n-NT
+        p = X.shape[1]
+
+        perm = np.random.permutation(X.shape[0])
+        Hinit = np.zeros((3), dtype=np.int)
+        Hinit[0:3] = perm[0:3]
+        
+        beta = C_step(X,y,Hinit,alpha)
+        oldH = np.zeros((h),dtype=int)
+        for step in range(max_iter):
+            H = np.array(indexofksmallest(residuals(X,y,beta),h))
+            if(H == oldH).all():
+                break
+            beta = C_step(X,y,H,alpha)
+            oldH[:]=H[:]
+        
+        XH = np.zeros((h,p))
+        YH = np.zeros((h))
+        for step in range(h):
+            XH[step,:] = X[H[step],:]
+            YH[step] = y[H[step]]
+        lasso = Lasso(alpha)
+        lasso.fit(XH,YH)
+
+        coef_ = lasso.coef_
+        dual_gap_ = lasso.dual_gap_
+        n_iter_ = lasso.n_iter_
+
+
+
+        coefs[:, i] = coef_[:]
+        dual_gaps[i] = dual_gap_
+        n_iters.append(n_iter_)
+        if verbose:
+            if verbose > 2:
+                print(model)
+            elif verbose > 1:
+                print('Path: %03i out of %03i' % (i, n_alphas))
+            else:
+                sys.stderr.write('.')
+
+    if return_n_iter:
+        return alphas, coefs, dual_gaps, n_iters
+    return alphas, coefs, dual_gaps
+
+
+
+##############################################
+
+
+    #max_iter = 100
+
+    #n = X.shape[0]
+    #h = n-NT
+    #p = X.shape[1]
+
+    #perm = np.random.permutation(X.shape[0])
+    #Hinit = np.zeros((3), dtype=np.int)
+    #Hinit[0:3] = perm[0:3]
+    #
+    #beta = C_step(X,y,Hinit,alphas[0])
+    #oldH = np.zeros((h),dtype=int)
+    #for i in range(max_iter):
+    #    H = np.array(indexofksmallest(residuals(X,y,beta),h))
+    #    if(H == oldH).all():
+    #        break
+    #    beta = C_step(X,y,H,alphas[0])
+    #    oldH[:]=H[:]
+    #
+    #XH = np.zeros((h,p))
+    #YH = np.zeros((h))
+    #for i in range(h):
+    #    XH[i,:] = X[H[i],:]
+    #    YH[i] = y[H[i]]
+    #lasso = Lasso(alphas[0])
+    #lasso.fit(XH,YH)
+
+    #coefs = lasso.coef_[:,np.newaxis]
+    #dual_gaps = lasso.dual_gap_[np.newaxis]
+    #iters = np.array([lasso.n_iter_])
+
+    #if return_n_iter:
+    #    return alphas, coefs, dual_gaps, iters
+    #return alphas, coefs, dual_gaps
+
+
+##############################################
+
 def enet_path_trimmed_Q(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
               precompute='auto', Xy=None, copy_X=True, coef_init=None,
               verbose=False, return_n_iter=False, positive=False,
               check_input=True, NT=0, **params):
     """ compute X^t X and X^t y with NT-trimmed dot product, then proceed to standard enet_path
     """
-    print("Using trimmed Q")
     q = tdp.tdot(X.T,y,NT)
     Q = tdp.tdot(X.T,X,NT)
 
@@ -630,7 +826,7 @@ class ElasticNet(LinearModel, RegressorMixin):
     def __init__(self, alpha=1.0, l1_ratio=0.5, fit_intercept=True,
                  normalize=False, precompute=False, max_iter=1000,
                  copy_X=True, tol=1e-4, warm_start=False, positive=False,
-                 random_state=None, selection='cyclic', Xy=None, trimmed=0, pre_trimmed=0):
+                 random_state=None, selection='cyclic', Xy=None):
         self.alpha = alpha
         self.l1_ratio = l1_ratio
         self.coef_ = None
@@ -646,15 +842,7 @@ class ElasticNet(LinearModel, RegressorMixin):
         self.random_state = random_state
         self.selection = selection
         self.Xy = Xy
-        self.trimmed = trimmed
-        self.pre_trimmed = pre_trimmed
-
-        if(self.pre_trimmed != 0):
-            self.path = lambda *pos,**params : enet_path_trimmed_Q(*pos,**params,NT=self.pre_trimmed)
-        elif(self.trimmed != 0):
-            self.path = lambda *pos,**params : enet_path(*pos,**params,NT=self.trimmed)
-        else:
-            self.path = enet_path
+        self.path = enet_path
 
     def fit(self, X, y, check_input=True):
         """Fit model with coordinate descent.
@@ -920,19 +1108,59 @@ class Lasso(ElasticNet):
     def __init__(self, alpha=1.0, fit_intercept=True, normalize=False,
                  precompute=False, copy_X=True, max_iter=1000,
                  tol=1e-4, warm_start=False, positive=False,
-                 random_state=None, selection='cyclic', Xy=None, trimmed=0, pre_trimmed=0):
+                 random_state=None, selection='cyclic', Xy=None):
         super(Lasso, self).__init__(
             alpha=alpha, l1_ratio=1.0, fit_intercept=fit_intercept,
             normalize=normalize, precompute=precompute, copy_X=copy_X,
             max_iter=max_iter, tol=tol, warm_start=warm_start,
             positive=positive, random_state=random_state,
-            selection=selection,Xy=Xy,trimmed=trimmed,pre_trimmed=pre_trimmed)
-        if(self.pre_trimmed != 0):
-            self.path = lambda *pos,**params : enet_path_trimmed_Q(*pos,**params,NT=self.pre_trimmed)
-        elif(self.trimmed != 0):
-            self.path = lambda *pos,**params : enet_path(*pos,**params,NT=self.trimmed)
-        else:
+            selection=selection,Xy=Xy)
+        self.path = enet_path
+
+###############################################################################
+# Trimmed lasso class
+
+class TrimmedLasso(Lasso):
+
+    def __init__(self, alpha=1.0, fit_intercept=True, normalize=False,
+                 precompute=False, copy_X=True, max_iter=1000,
+                 tol=1e-4, warm_start=False, positive=False,
+                 random_state=None, selection='cyclic', Xy=None,trimmed=0,pre_trimmed=False):
+        super(TrimmedLasso, self).__init__(
+            alpha=alpha, fit_intercept=fit_intercept,
+            normalize=normalize, precompute=precompute, copy_X=copy_X,
+            max_iter=max_iter, tol=tol, warm_start=warm_start,
+            positive=positive, random_state=random_state,
+            selection=selection,Xy=Xy)
+        self.trimmed = trimmed
+        self.pre_trimmed = pre_trimmed
+
+        if(self.trimmed == 0):
             self.path = enet_path
+        elif(pre_trimmed):
+            self.path = lambda *p, **pp : enet_path_trimmed_Q(*p, **pp, NT = self.trimmed)
+        else:
+            self.path = lambda *p, **pp : enet_path(*p, **pp, NT = self.trimmed)
+
+
+###############################################################################
+# Sparse lts class
+
+class SparseLTS(ElasticNet):
+
+    def __init__(self, alpha=1.0, fit_intercept=True, normalize=False,
+                 precompute=False, copy_X=True, max_iter=1000,
+                 tol=1e-4, warm_start=False, positive=False,
+                 random_state=None, selection='cyclic', Xy=None, trimmed=0):
+        super(SparseLTS, self).__init__(
+            alpha=alpha, l1_ratio=1.0, fit_intercept=fit_intercept,
+            normalize=normalize, precompute=precompute, copy_X=copy_X,
+            max_iter=max_iter, tol=tol, warm_start=warm_start,
+            positive=positive, random_state=random_state,
+            selection=selection,Xy=Xy)
+        self.trimmed = trimmed
+        self.path = lambda *p, **pp : lts_path(*p, **pp, NT=self.trimmed)
+
 
 
 ###############################################################################
@@ -2191,3 +2419,31 @@ class MultiTaskLassoCV(LinearModelCV, RegressorMixin):
             max_iter=max_iter, tol=tol, copy_X=copy_X,
             cv=cv, verbose=verbose, n_jobs=n_jobs, random_state=random_state,
             selection=selection)
+
+
+
+###############################################################################
+# SparseCV lts class
+
+class SparseLTSCV(LinearModelCV, RegressorMixin):
+
+    path = staticmethod(lasso_path)
+
+    def __init__(self, eps=1e-3, n_alphas=100, alphas=None, fit_intercept=True,
+                 normalize=False, precompute='auto', max_iter=1000, tol=1e-4,
+                 copy_X=True, cv=None, verbose=False, n_jobs=1,
+                 positive=False, random_state=None, selection='cyclic',trimmed=0):
+        super(SparseLTSCV, self).__init__(
+            eps=eps, n_alphas=n_alphas, alphas=alphas,
+            fit_intercept=fit_intercept, normalize=normalize,
+            precompute=precompute, max_iter=max_iter, tol=tol, copy_X=copy_X,
+            cv=cv, verbose=verbose, n_jobs=n_jobs, positive=positive,
+            random_state=random_state, selection=selection)
+        self.trimmed = trimmed
+        self.path = lambda *p, **pp : lts_path(*p, **pp, NT=self.trimmed)
+
+
+
+
+
+
