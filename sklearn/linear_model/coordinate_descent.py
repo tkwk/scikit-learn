@@ -10,6 +10,7 @@ import warnings
 from abc import ABCMeta, abstractmethod
 
 import numpy as np
+import numpy.linalg as linalg
 from scipy import sparse
 
 from .base import LinearModel, _pre_fit
@@ -298,6 +299,7 @@ def lts_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
               check_input=True, NT=0, **params):
     """ Sparse LTS algorithm
     """
+
 ##############################################
     # We expect X and y to be already float64 Fortran ordered when bypassing
     # checks
@@ -365,8 +367,6 @@ def lts_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
 
     for i, alpha in enumerate(alphas):
 
-
-
         max_iter = 100
 
         n = X.shape[0]
@@ -416,46 +416,6 @@ def lts_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
     return alphas, coefs, dual_gaps
 
 
-
-##############################################
-
-
-    #max_iter = 100
-
-    #n = X.shape[0]
-    #h = n-NT
-    #p = X.shape[1]
-
-    #perm = np.random.permutation(X.shape[0])
-    #Hinit = np.zeros((3), dtype=np.int)
-    #Hinit[0:3] = perm[0:3]
-    #
-    #beta = C_step(X,y,Hinit,alphas[0])
-    #oldH = np.zeros((h),dtype=int)
-    #for i in range(max_iter):
-    #    H = np.array(indexofksmallest(residuals(X,y,beta),h))
-    #    if(H == oldH).all():
-    #        break
-    #    beta = C_step(X,y,H,alphas[0])
-    #    oldH[:]=H[:]
-    #
-    #XH = np.zeros((h,p))
-    #YH = np.zeros((h))
-    #for i in range(h):
-    #    XH[i,:] = X[H[i],:]
-    #    YH[i] = y[H[i]]
-    #lasso = Lasso(alphas[0])
-    #lasso.fit(XH,YH)
-
-    #coefs = lasso.coef_[:,np.newaxis]
-    #dual_gaps = lasso.dual_gap_[np.newaxis]
-    #iters = np.array([lasso.n_iter_])
-
-    #if return_n_iter:
-    #    return alphas, coefs, dual_gaps, iters
-    #return alphas, coefs, dual_gaps
-
-
 ##############################################
 
 def enet_path_trimmed_Q(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
@@ -475,7 +435,9 @@ def enet_path_trimmed_Q(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
 def enet_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
               precompute='auto', Xy=None, copy_X=True, coef_init=None,
               verbose=False, return_n_iter=False, positive=False,
-              check_input=True, NT=0, **params):
+              check_input=True, NT=0, cfact=-1.0, **params):
+
+    print(alphas)
     """Compute elastic net path with coordinate descent
 
     The elastic net optimization function varies for mono and multi-outputs.
@@ -649,6 +611,8 @@ def enet_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
         coef_ = np.asfortranarray(coef_init)
 
     for i, alpha in enumerate(alphas):
+        
+        print(alpha)
         l1_reg = alpha * l1_ratio * n_samples
         l2_reg = alpha * (1.0 - l1_ratio) * n_samples
         if not multi_output and sparse.isspmatrix(X):
@@ -669,9 +633,14 @@ def enet_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
                 coef_, l1_reg, l2_reg, precompute, Xy, y, max_iter,
                 tol, rng, random, positive)
         elif precompute is False:
-            model = cd_fast.enet_coordinate_descent(
-                coef_, l1_reg, l2_reg, X, y, max_iter, tol, rng, random,
-                positive, trimmed = NT)
+            if(cfact>=0):
+                model = cd_fast.md_lasso_descent(
+                    coef_, l1_reg, cfact, X, y, max_iter, tol, rng, random,
+                    positive)
+            else:
+                model = cd_fast.enet_coordinate_descent(
+                    coef_, l1_reg, l2_reg, X, y, max_iter, tol, rng, random,
+                    positive, trimmed = NT)
         else:
             raise ValueError("Precompute should be one of True, False, "
                              "'auto' or array-like")
@@ -1161,13 +1130,31 @@ class SparseLTS(ElasticNet):
         self.trimmed = trimmed
         self.path = lambda *p, **pp : lts_path(*p, **pp, NT=self.trimmed)
 
+###############################################################################
+# MD-Lasso lts class
+
+class MDLasso(ElasticNet):
+
+    def __init__(self, alpha=1.0, fit_intercept=True, normalize=False,
+                 precompute=False, copy_X=True, max_iter=1000,
+                 tol=1e-4, warm_start=False, positive=False,
+                 random_state=None, selection='cyclic', Xy=None, c=-1.0):
+        super(MDLasso, self).__init__(
+            alpha=alpha, l1_ratio=1.0, fit_intercept=fit_intercept,
+            normalize=normalize, precompute=precompute, copy_X=copy_X,
+            max_iter=max_iter, tol=tol, warm_start=warm_start,
+            positive=positive, random_state=random_state,
+            selection=selection,Xy=Xy)
+        self.c = c
+        self.path = lambda *p, **pp : enet_path(*p, **pp, cfact=self.c)
+
 
 
 ###############################################################################
 # Functions for CV with paths functions
 
 def _path_residuals(X, y, train, test, path, path_params, alphas=None,
-                    l1_ratio=1, X_order=None, dtype=None):
+                    l1_ratio=1, X_order=None, dtype=None,scoring=None):
     """Returns the MSE for the models computed by 'path'
 
     Parameters
@@ -1264,9 +1251,12 @@ def _path_residuals(X, y, train, test, path, path_params, alphas=None,
         X_test_coefs = X_test_coefs.reshape(X_test.shape[0], n_order, -1)
     else:
         X_test_coefs = safe_sparse_dot(X_test, coefs)
-    residues = X_test_coefs - y_test[:, :, np.newaxis]
-    residues += intercepts
-    this_mses = ((residues ** 2).mean(axis=0)).mean(axis=0)
+    if scoring == None:
+        residues = X_test_coefs - y_test[:, :, np.newaxis]
+        residues += intercepts
+        this_mses = ((residues ** 2).mean(axis=0)).mean(axis=0)
+    else:
+        this_mses = scoring(X_test_coefs,y_test,intercepts)
 
     return this_mses
 
@@ -1278,7 +1268,7 @@ class LinearModelCV(six.with_metaclass(ABCMeta, LinearModel)):
     def __init__(self, eps=1e-3, n_alphas=100, alphas=None, fit_intercept=True,
                  normalize=False, precompute='auto', max_iter=1000, tol=1e-4,
                  copy_X=True, cv=None, verbose=False, n_jobs=1,
-                 positive=False, random_state=None, selection='cyclic'):
+                 positive=False, random_state=None, selection='cyclic',scoring=None):
         self.eps = eps
         self.n_alphas = n_alphas
         self.alphas = alphas
@@ -1294,6 +1284,7 @@ class LinearModelCV(six.with_metaclass(ABCMeta, LinearModel)):
         self.positive = positive
         self.random_state = random_state
         self.selection = selection
+        self.scoring = scoring
 
     def fit(self, X, y):
         """Fit linear model with coordinate descent
@@ -1316,12 +1307,24 @@ class LinearModelCV(six.with_metaclass(ABCMeta, LinearModel)):
 
         if hasattr(self, 'l1_ratio'):
             model_str = 'ElasticNet'
+        elif hasattr(self, 'pre_trimmed'):
+            model_str = 'TrimmedLasso'
+        elif hasattr(self, 'trimmed'):
+            model_str = 'SparseLTS'
+        elif hasattr(self, 'c'):
+            model_str = 'MDLasso'
         else:
             model_str = 'Lasso'
 
-        if isinstance(self, ElasticNetCV) or isinstance(self, LassoCV):
+        if isinstance(self, ElasticNetCV) or isinstance(self, LassoCV) or isinstance(self, TrimmedLassoCV) or isinstance(self, SparseLTSCV) or isinstance(self, MDLassoCV):
             if model_str == 'ElasticNet':
                 model = ElasticNet()
+            elif model_str == 'TrimmedLasso':
+                model = TrimmedLasso(trimmed = self.trimmed, pre_trimmed=self.pre_trimmed)
+            elif model_str == 'SparseLTS':
+                model = SparseLTS(trimmed = self.trimmed)
+            elif model_str == 'MDLasso':
+                model = MDLasso(c = self.c)
             else:
                 model = Lasso()
             if y.ndim > 1 and y.shape[1] > 1:
@@ -1420,7 +1423,7 @@ class LinearModelCV(six.with_metaclass(ABCMeta, LinearModel)):
         jobs = (delayed(_path_residuals)(X, y, train, test, self.path,
                                          path_params, alphas=this_alphas,
                                          l1_ratio=this_l1_ratio, X_order='F',
-                                         dtype=np.float64)
+                                         dtype=np.float64,scoring=self.scoring)
                 for this_l1_ratio, this_alphas in zip(l1_ratios, alphas)
                 for train, test in folds)
         mse_paths = Parallel(n_jobs=self.n_jobs, verbose=self.verbose,
@@ -1464,6 +1467,56 @@ class LinearModelCV(six.with_metaclass(ABCMeta, LinearModel)):
         self.dual_gap_ = model.dual_gap_
         self.n_iter_ = model.n_iter_
         return self
+
+
+##################################################################################
+
+class TrimmedLassoCV(LinearModelCV, RegressorMixin):
+
+    def __init__(self, eps=1e-3, n_alphas=100, alphas=None, fit_intercept=True,
+                 normalize=False, precompute='auto', max_iter=1000, tol=1e-4,
+                 copy_X=True, cv=None, verbose=False, n_jobs=1,
+                 positive=False, random_state=None, selection='cyclic',trimmed=0,pre_trimmed=False,scoring=None):
+
+        super(TrimmedLassoCV, self).__init__(
+            eps=eps, n_alphas=n_alphas, alphas=alphas,
+            fit_intercept=fit_intercept, normalize=normalize,
+            precompute=precompute, max_iter=max_iter, tol=tol, copy_X=copy_X,
+            cv=cv, verbose=verbose, n_jobs=n_jobs, positive=positive,
+            random_state=random_state, selection=selection,scoring=scoring)
+
+        self.trimmed = trimmed
+        self.pre_trimmed = pre_trimmed
+
+        if(self.trimmed == 0):
+            self.path = enet_path
+        elif(pre_trimmed):
+            self.path = lambda *p, **pp : enet_path_trimmed_Q(*p, **pp, NT = self.trimmed)
+        else:
+            self.path = lambda *p, **pp : enet_path(*p, **pp, NT = self.trimmed)
+
+##################################################################################
+
+class MDLassoCV(LinearModelCV, RegressorMixin):
+
+    def __init__(self, eps=1e-3, n_alphas=100, alphas=None, fit_intercept=True,
+                 normalize=False, precompute='auto', max_iter=1000, tol=1e-4,
+                 copy_X=True, cv=None, verbose=False, n_jobs=1,
+                 positive=False, random_state=None, selection='cyclic',c=-1.0,scoring=None):
+
+        super(MDLassoCV, self).__init__(
+            eps=eps, n_alphas=n_alphas, alphas=alphas,
+            fit_intercept=fit_intercept, normalize=normalize,
+            precompute=precompute, max_iter=max_iter, tol=tol, copy_X=copy_X,
+            cv=cv, verbose=verbose, n_jobs=n_jobs, positive=positive,
+            random_state=random_state, selection=selection,scoring=scoring)
+
+        self.c = c
+        self.path = lambda *p, **pp : enet_path(*p, **pp, cfact=self.c)
+
+
+
+##################################################################################
 
 
 class LassoCV(LinearModelCV, RegressorMixin):
@@ -1603,13 +1656,13 @@ class LassoCV(LinearModelCV, RegressorMixin):
     def __init__(self, eps=1e-3, n_alphas=100, alphas=None, fit_intercept=True,
                  normalize=False, precompute='auto', max_iter=1000, tol=1e-4,
                  copy_X=True, cv=None, verbose=False, n_jobs=1,
-                 positive=False, random_state=None, selection='cyclic'):
+                 positive=False, random_state=None, selection='cyclic',scoring=None):
         super(LassoCV, self).__init__(
             eps=eps, n_alphas=n_alphas, alphas=alphas,
             fit_intercept=fit_intercept, normalize=normalize,
             precompute=precompute, max_iter=max_iter, tol=tol, copy_X=copy_X,
             cv=cv, verbose=verbose, n_jobs=n_jobs, positive=positive,
-            random_state=random_state, selection=selection)
+            random_state=random_state, selection=selection,scoring=scoring)
 
 
 class ElasticNetCV(LinearModelCV, RegressorMixin):
@@ -2432,13 +2485,13 @@ class SparseLTSCV(LinearModelCV, RegressorMixin):
     def __init__(self, eps=1e-3, n_alphas=100, alphas=None, fit_intercept=True,
                  normalize=False, precompute='auto', max_iter=1000, tol=1e-4,
                  copy_X=True, cv=None, verbose=False, n_jobs=1,
-                 positive=False, random_state=None, selection='cyclic',trimmed=0):
+                 positive=False, random_state=None, selection='cyclic',trimmed=0,scoring=None):
         super(SparseLTSCV, self).__init__(
             eps=eps, n_alphas=n_alphas, alphas=alphas,
             fit_intercept=fit_intercept, normalize=normalize,
             precompute=precompute, max_iter=max_iter, tol=tol, copy_X=copy_X,
             cv=cv, verbose=verbose, n_jobs=n_jobs, positive=positive,
-            random_state=random_state, selection=selection)
+            random_state=random_state, selection=selection,scoring=scoring)
         self.trimmed = trimmed
         self.path = lambda *p, **pp : lts_path(*p, **pp, NT=self.trimmed)
 

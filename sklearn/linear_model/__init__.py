@@ -18,7 +18,7 @@ from .coordinate_descent import (Lasso, ElasticNet, LassoCV, ElasticNetCV,
                                  lasso_path, enet_path, MultiTaskLasso,
                                  MultiTaskElasticNet, MultiTaskElasticNetCV,
                                  MultiTaskLassoCV, TrimmedLasso, SparseLTS,
-                                 SparseLTSCV)
+                                 SparseLTSCV, TrimmedLassoCV, MDLasso, MDLassoCV)
 from .huber import HuberRegressor
 from .sgd_fast import Hinge, Log, ModifiedHuber, SquaredLoss, Huber
 from .stochastic_gradient import SGDClassifier, SGDRegressor
@@ -49,6 +49,9 @@ __all__ = ['ARDRegression',
            'LassoLars',
            'LassoLarsCV',
            'SparseLTSCV',
+           'TrimmedLassoCV',
+           'MDLasso',
+           'MDLassoCV',
            'LassoLarsIC',
            'TrimmedLasso',
            'SparseLTS',

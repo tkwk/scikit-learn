@@ -7,6 +7,7 @@
 # Licence: BSD 3 clause
 
 from libc.math cimport fabs
+from libc.math cimport exp
 cimport numpy as np
 import numpy as np
 import numpy.linalg as linalg
@@ -121,6 +122,130 @@ cdef extern from "cblas.h":
     void dscal "cblas_dscal"(int N, double alpha, double *X, int incX) nogil
 
 ctypedef double (*dotprod) (int, double*, int, double*, int) nogil
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def md_lasso_descent(np.ndarray[DOUBLE, ndim=1] w,
+                            double alpha, double c,
+                            np.ndarray[DOUBLE, ndim=2, mode='fortran'] X,
+                            np.ndarray[DOUBLE, ndim=1, mode='c'] y,
+                            int max_iter, double tol,
+                            object rng, bint random=0, bint positive=0):
+    """Cython version of the gradient descent for minimum distance Lasso
+
+        We minimize
+
+        -c log( \Sum( -1/2c exp(yi-XiW)^2 ) ) + alpha norm(w, 1)
+
+    """ 
+
+    # get the data information into easy vars
+    cdef unsigned int n_samples = X.shape[0]
+    cdef unsigned int n_features = X.shape[1]
+
+    # get the number of tasks indirectly, using strides
+    cdef unsigned int n_tasks = y.strides[0] / sizeof(DOUBLE)
+
+    # compute norms of the columns of X
+    cdef np.ndarray[DOUBLE, ndim=1] norm_cols_X = (X**2).sum(axis=0)
+    cdef double maxnorm = np.max(norm_cols_X)
+
+    # initial value of the residuals
+    cdef np.ndarray[DOUBLE, ndim=1] R = np.zeros(n_samples)
+
+    # generalized residuals
+    cdef np.ndarray[DOUBLE, ndim=1] RG = np.zeros(n_samples)
+
+    # weights
+    cpdef np.ndarray[DOUBLE, ndim=1] weights = np.zeros(n_samples)
+    
+    # gradient
+    cdef np.ndarray[DOUBLE, ndim=1] grad = np.zeros(n_features)
+
+    cdef double step = 0.0
+    W, V = linalg.eigh(np.dot(X.T,X))
+    step = 1.0/np.max(W)
+
+    cdef unsigned int ind = 0
+
+    cdef np.ndarray[DOUBLE, ndim=1] XtA = np.empty(n_features)
+
+    cdef double tmp
+    cdef double w_ii
+    cdef double d_w_max
+    cdef double w_max
+    cdef double d_w_ii
+    cdef double gap = tol + 1.0
+    cdef double d_w_tol = tol
+    cdef double dual_norm_XtA
+    cdef double R_norm2
+    cdef double w_norm2
+    cdef double l1_norm
+    cdef unsigned int ii
+    cdef unsigned int i
+    cdef unsigned int n_iter = 0
+    cdef unsigned int f_iter
+    cdef UINT32_t rand_r_state_seed = rng.randint(0, RAND_R_MAX)
+    cdef UINT32_t* rand_r_state = &rand_r_state_seed
+
+    if alpha == 0:
+        warnings.warn("Coordinate descent with alpha=0 may lead to unexpected"
+            " results and is discouraged.")
+
+    with nogil:
+        # R = y - np.dot(X, w)
+        for i in range(n_samples):
+                R[i] = y[i] - ddot(n_features,
+                                    <DOUBLE*>(X.data + i * sizeof(DOUBLE)),
+                                    n_samples, <DOUBLE*>w.data, 1)
+
+        # tol *= np.dot(y, y)
+        tol *= ddot(n_samples, <DOUBLE*>y.data, n_tasks,
+                    <DOUBLE*>y.data, n_tasks)
+        
+        for n_iter in range(max_iter):
+            
+            # R = y - np.dot(X, w)
+            for ind in range(n_samples):
+                R[ind] = y[ind] - ddot(n_features,
+                                    <DOUBLE*>(X.data + ind * sizeof(DOUBLE)),
+                                    n_samples, <DOUBLE*>w.data, 1)
+
+            w_max = 0.0
+            d_w_max = 0.0
+            
+            tmp = 0.0
+            for ind in range(n_samples):
+                tmp += exp((-1.0/(2.0*c))*R[ind]*R[ind])
+            for ind in range(n_samples):
+                weights[ind] = n_samples*exp((-1.0/(2.0*c))*R[ind]*R[ind])/tmp
+
+            #RG = ri.wi
+            for ind in range(n_samples):
+                RG[ind] = R[ind]*weights[ind]
+
+            #grad = -X^t.RG
+            #for ind in range(n_features):
+            #    grad[ind] = -ddot(n_samples,
+            #                    <DOUBLE*>(X.data + ind*sizeof(DOUBLE)*n_samples),1,
+            #                    <DOUBLE*>(RG.data),1)
+            with gil:
+                grad = -np.dot(X.T,RG)
+
+            for ind in range(n_features):
+                w_ii = w[ind]
+                tmp = w[ind] - (step)*grad[ind]
+                w[ind] = (fsign(tmp) * fmax(fabs(tmp) - (alpha*step), 0))
+                d_w_max = fmax(d_w_max,fabs(w_ii-w[ind]))
+
+            
+            if d_w_max < d_w_tol:
+                gap = 0
+                #break
+            
+    return w, gap, tol, n_iter + 1
+
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
