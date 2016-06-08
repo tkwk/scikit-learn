@@ -296,9 +296,10 @@ def indexofklargest(tab,k):
 def lts_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
               precompute='auto', Xy=None, copy_X=True, coef_init=None,
               verbose=False, return_n_iter=False, positive=False,
-              check_input=True, NT=0, **params):
+              check_input=True, NT=0.0, **params):
     """ Sparse LTS algorithm
     """
+    
 
 ##############################################
     # We expect X and y to be already float64 Fortran ordered when bypassing
@@ -312,6 +313,8 @@ def lts_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
             Xy = check_array(Xy, dtype=np.float64, order='C', copy=False,
                              ensure_2d=False)
     n_samples, n_features = X.shape
+
+    NT = int(NT*n_samples)
 
     multi_output = False
     if y.ndim != 1:
@@ -421,7 +424,7 @@ def lts_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
 def enet_path_trimmed_Q(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
               precompute='auto', Xy=None, copy_X=True, coef_init=None,
               verbose=False, return_n_iter=False, positive=False,
-              check_input=True, NT=0, **params):
+              check_input=True, NT=0.0, **params):
     """ compute X^t X and X^t y with NT-trimmed dot product, then proceed to standard enet_path
     """
     q = tdp.tdot(X.T,y,NT)
@@ -435,9 +438,8 @@ def enet_path_trimmed_Q(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
 def enet_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
               precompute='auto', Xy=None, copy_X=True, coef_init=None,
               verbose=False, return_n_iter=False, positive=False,
-              check_input=True, NT=0, cfact=-1.0, **params):
+              check_input=True, NT=0.0, cfact=-1.0, **params):
 
-    print(alphas)
     """Compute elastic net path with coordinate descent
 
     The elastic net optimization function varies for mono and multi-outputs.
@@ -558,6 +560,8 @@ def enet_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
                              ensure_2d=False)
     n_samples, n_features = X.shape
 
+    NT = int(NT*n_samples)
+
     multi_output = False
     if y.ndim != 1:
         multi_output = True
@@ -612,7 +616,6 @@ def enet_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
 
     for i, alpha in enumerate(alphas):
         
-        print(alpha)
         l1_reg = alpha * l1_ratio * n_samples
         l2_reg = alpha * (1.0 - l1_ratio) * n_samples
         if not multi_output and sparse.isspmatrix(X):
@@ -1256,8 +1259,7 @@ def _path_residuals(X, y, train, test, path, path_params, alphas=None,
         residues += intercepts
         this_mses = ((residues ** 2).mean(axis=0)).mean(axis=0)
     else:
-        this_mses = scoring(X_test_coefs,y_test,intercepts)
-
+        this_mses = scoring(X_test,y_test,coefs,intercepts,X_test_coefs)
     return this_mses
 
 
