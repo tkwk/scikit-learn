@@ -427,6 +427,7 @@ def enet_path_trimmed_Q(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
               check_input=True, NT=0.0, **params):
     """ compute X^t X and X^t y with NT-trimmed dot product, then proceed to standard enet_path
     """
+    NT = int(NT*X.shape[0])
     q = tdp.tdot(X.T,y,NT)
     Q = tdp.tdot(X.T,X,NT)
 
