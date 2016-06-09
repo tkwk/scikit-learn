@@ -641,10 +641,14 @@ def enet_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
                 model = cd_fast.md_lasso_descent(
                     coef_, l1_reg, cfact, X, y, max_iter, tol, rng, random,
                     positive)
+            elif(NT>0.0):
+                model = cd_fast.enet_coordinate_descent_trimmed(
+                    coef_, l1_reg, l2_reg, X, y, max_iter, tol, rng, random,
+                    positive, trimmed = NT)
             else:
                 model = cd_fast.enet_coordinate_descent(
                     coef_, l1_reg, l2_reg, X, y, max_iter, tol, rng, random,
-                    positive, trimmed = NT)
+                    positive)
         else:
             raise ValueError("Precompute should be one of True, False, "
                              "'auto' or array-like")

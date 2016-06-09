@@ -123,6 +123,7 @@ cdef extern from "cblas.h":
 
 ctypedef double (*dotprod) (int, double*, int, double*, int) nogil
 
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
@@ -246,11 +247,10 @@ def md_lasso_descent(np.ndarray[DOUBLE, ndim=1] w,
             
     return w, gap, tol, n_iter + 1
 
-
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.cdivision(True)
-def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
+def enet_coordinate_descent_trimmed(np.ndarray[DOUBLE, ndim=1] w,
                             double alpha, double beta,
                             np.ndarray[DOUBLE, ndim=2, mode='fortran'] X,
                             np.ndarray[DOUBLE, ndim=1, mode='c'] y,
@@ -264,6 +264,7 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
         (1/2) * norm(y - X w, 2)^2 + alpha norm(w, 1) + (beta/2) norm(w, 2)^2
 
     """
+
 #definition of the dot product
     cdef dotprod myddot = ddot
 
@@ -271,13 +272,11 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
     cdef unsigned int n_samples = X.shape[0]
     cdef unsigned int n_features = X.shape[1]
 
-#if we use trimmed dot product:
     cdef unsigned int ind
     cdef np.ndarray[np.int32_t, ndim=1] Hindex = np.zeros(trimmed, dtype=np.int32)
     cdef np.ndarray[DOUBLE, ndim=1] HR = np.zeros(n_features)
-    if(trimmed != 0):
-        tdp.gNT = trimmed
-        myddot = tdp.tddot
+    tdp.gNT = trimmed
+    myddot = tdp.tddot
 
     # get the number of tasks indirectly, using strides
     cdef unsigned int n_tasks = y.strides[0] / sizeof(DOUBLE)
@@ -391,10 +390,129 @@ def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
                     or d_w_max / w_max < d_w_tol
                     or n_iter == max_iter - 1):
 
-#if we use the trimmed dot product, quit when DeltaW < epsilon
-                if trimmed !=0 :
-                    gap = 0.0 #pour que sci-kit learn ne lance pas un warning de non convergence
-                    break
+                gap = 0.0 #pour que sci-kit learn ne lance pas un warning de non convergence
+                break
+
+    return w, gap, tol, n_iter + 1
+
+
+
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def enet_coordinate_descent(np.ndarray[DOUBLE, ndim=1] w,
+                            double alpha, double beta,
+                            np.ndarray[DOUBLE, ndim=2, mode='fortran'] X,
+                            np.ndarray[DOUBLE, ndim=1, mode='c'] y,
+                            int max_iter, double tol,
+                            object rng, bint random=0, bint positive=0):
+    """Cython version of the coordinate descent algorithm
+        for Elastic-Net regression
+
+        We minimize
+
+        (1/2) * norm(y - X w, 2)^2 + alpha norm(w, 1) + (beta/2) norm(w, 2)^2
+
+    """
+#definition of the dot product
+    cdef dotprod myddot = ddot
+
+    # get the data information into easy vars
+    cdef unsigned int n_samples = X.shape[0]
+    cdef unsigned int n_features = X.shape[1]
+
+    # get the number of tasks indirectly, using strides
+    cdef unsigned int n_tasks = y.strides[0] / sizeof(DOUBLE)
+
+    # compute norms of the columns of X
+    cdef np.ndarray[DOUBLE, ndim=1] norm_cols_X = (X**2).sum(axis=0)
+
+    # initial value of the residuals
+    cdef np.ndarray[DOUBLE, ndim=1] R = np.empty(n_samples)
+
+    cdef np.ndarray[DOUBLE, ndim=1] XtA = np.empty(n_features)
+    cdef double tmp
+    cdef double w_ii
+    cdef double d_w_max
+    cdef double w_max
+    cdef double d_w_ii
+    cdef double gap = tol + 1.0
+    cdef double d_w_tol = tol
+    cdef double dual_norm_XtA
+    cdef double R_norm2
+    cdef double w_norm2
+    cdef double l1_norm
+    cdef unsigned int ii
+    cdef unsigned int i
+    cdef unsigned int n_iter = 0
+    cdef unsigned int f_iter
+    cdef UINT32_t rand_r_state_seed = rng.randint(0, RAND_R_MAX)
+    cdef UINT32_t* rand_r_state = &rand_r_state_seed
+
+    if alpha == 0:
+        warnings.warn("Coordinate descent with alpha=0 may lead to unexpected"
+            " results and is discouraged.")
+
+    with nogil:
+        # R = y - np.dot(X, w)
+        for i in range(n_samples):
+                R[i] = y[i] - myddot(n_features,
+                                    <DOUBLE*>(X.data + i * sizeof(DOUBLE)),
+                                    n_samples, <DOUBLE*>w.data, 1)
+
+        # tol *= np.dot(y, y)
+        tol *= myddot(n_samples, <DOUBLE*>y.data, n_tasks,
+                    <DOUBLE*>y.data, n_tasks)
+        
+        for n_iter in range(max_iter):
+            w_max = 0.0
+            d_w_max = 0.0
+            for f_iter in range(n_features):  # Loop over coordinates
+                if random:
+                    ii = rand_int(n_features, rand_r_state)
+                else:
+                    ii = f_iter
+
+                if norm_cols_X[ii] == 0.0:
+                    continue
+
+                w_ii = w[ii]  # Store previous value
+
+                if w_ii != 0.0:
+                    # R += w_ii * X[:,ii]
+                    daxpy(n_samples, w_ii,
+                          <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
+                          1, <DOUBLE*>R.data, 1)
+
+                # tmp = (X[:,ii]*R).sum()
+                tmp = myddot(n_samples,
+                      <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
+                      1, <DOUBLE*>R.data, 1)
+
+                if positive and tmp < 0:
+                    w[ii] = 0.0
+                else:
+                    w[ii] = (fsign(tmp) * fmax(fabs(tmp) - alpha, 0)
+                             / (norm_cols_X[ii] + beta))
+
+                if w[ii] != 0.0:
+                    # R -=  w[ii] * X[:,ii] # Update residual
+                    daxpy(n_samples, -w[ii],
+                          <DOUBLE*>(X.data + ii * n_samples * sizeof(DOUBLE)),
+                          1, <DOUBLE*>R.data, 1)
+
+               # update the maximum absolute coefficient update
+                d_w_ii = fabs(w[ii] - w_ii)
+                if d_w_ii > d_w_max:
+                    d_w_max = d_w_ii
+
+                if fabs(w[ii]) > w_max:
+                    w_max = fabs(w[ii])
+
+            if (w_max == 0.0
+                    or d_w_max / w_max < d_w_tol
+                    or n_iter == max_iter - 1):
 
                 # the biggest coordinate update of this iteration was smaller
                 # than the tolerance: check the duality gap as ultimate
