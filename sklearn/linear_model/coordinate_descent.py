@@ -292,6 +292,21 @@ def indexofklargest(tab,k):
     n = tab.shape[0]
     return sorted(tab.argsort()[n-k:n])
 
+def lts_score(h):
+    def this_score(X,Y,beta,intercept,xtimecoef):
+        n_alphas = beta.shape[2]
+        res = np.zeros((n_alphas))
+        nh = int((1.0-h)*Y.shape[0])
+        for i in range(n_alphas):
+            residues = (Y[:,0]-xtimecoef[:,0,i])**2
+            current = 0.0
+            for k in indexofksmallest(residues,nh):
+                current += residues[k]
+            res[i] = (1.0/nh)*current
+        return res
+    return this_score
+
+
 
 def lts_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
               precompute='auto', Xy=None, copy_X=True, coef_init=None,
@@ -313,7 +328,8 @@ def lts_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
             Xy = check_array(Xy, dtype=np.float64, order='C', copy=False,
                              ensure_2d=False)
     n_samples, n_features = X.shape
-
+    
+    percentage = NT
     NT = int(NT*n_samples)
 
     multi_output = False
@@ -371,41 +387,56 @@ def lts_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
     for i, alpha in enumerate(alphas):
 
         max_iter = 100
+        nb_repeat = 3
 
         n = X.shape[0]
         h = n-NT
         p = X.shape[1]
 
-        perm = np.random.permutation(X.shape[0])
-        Hinit = np.zeros((3), dtype=np.int)
-        Hinit[0:3] = perm[0:3]
+        best_score = np.inf
+        best_coef = None
+        best_dual_gap = None
+        best_n_iter = 0
+
+        for rep in range(nb_repeat):
+
+            perm = np.random.permutation(X.shape[0])
+            Hinit = np.zeros((3), dtype=np.int)
+            Hinit[0:3] = perm[0:3]
         
-        beta = C_step(X,y,Hinit,alpha)
-        oldH = np.zeros((h),dtype=int)
-        for step in range(max_iter):
-            H = np.array(indexofksmallest(residuals(X,y,beta),h))
-            if(H == oldH).all():
-                break
-            beta = C_step(X,y,H,alpha)
-            oldH[:]=H[:]
+            beta = C_step(X,y,Hinit,alpha)
+            oldH = np.zeros((h),dtype=int)
+            for step in range(max_iter):
+                H = np.array(indexofksmallest(residuals(X,y,beta),h))
+                if(H == oldH).all():
+                    break
+                beta = C_step(X,y,H,alpha)
+                oldH[:]=H[:]
         
-        XH = np.zeros((h,p))
-        YH = np.zeros((h))
-        for step in range(h):
-            XH[step,:] = X[H[step],:]
-            YH[step] = y[H[step]]
-        lasso = Lasso(alpha)
-        lasso.fit(XH,YH)
+            XH = np.zeros((h,p))
+            YH = np.zeros((h))
+            for step in range(h):
+                XH[step,:] = X[H[step],:]
+                YH[step] = y[H[step]]
+            lasso = Lasso(alpha)
+            lasso.fit(XH,YH)
 
-        coef_ = lasso.coef_
-        dual_gap_ = lasso.dual_gap_
-        n_iter_ = lasso.n_iter_
+            coef_ = lasso.coef_
+            dual_gap_ = lasso.dual_gap_
+            n_iter_ = lasso.n_iter_
 
+            inter = np.zeros((1,1))
+            inter[0,0] = lasso.intercept_
+            score = lts_score(1.0-percentage)(X,y[:,np.newaxis],coef_[np.newaxis,:,np.newaxis],inter,np.dot(X,lasso.coef_)[:,np.newaxis,np.newaxis])
 
+            if(score < best_score):
+                best_coef_ = coef_
+                best_dual_gap_ = dual_gap_
+                best_n_iter_ = n_iter_
 
-        coefs[:, i] = coef_[:]
-        dual_gaps[i] = dual_gap_
-        n_iters.append(n_iter_)
+        coefs[:, i] = best_coef_[:]
+        dual_gaps[i] = best_dual_gap_
+        n_iters.append(best_n_iter_)
         if verbose:
             if verbose > 2:
                 print(model)

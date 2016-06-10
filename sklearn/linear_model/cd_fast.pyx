@@ -227,21 +227,22 @@ def md_lasso_descent(np.ndarray[DOUBLE, ndim=1] w,
                 RG[ind] = R[ind]*weights[ind]
 
             #grad = -X^t.RG
-            #for ind in range(n_features):
-            #    grad[ind] = -ddot(n_samples,
-            #                    <DOUBLE*>(X.data + ind*sizeof(DOUBLE)*n_samples),1,
-            #                    <DOUBLE*>(RG.data),1)
-            with gil:
-                grad = -np.dot(X.T,RG)
-
+            for ind in range(n_features):
+                grad[ind] = -ddot(n_samples,
+                                <DOUBLE*>(X.data + ind*sizeof(DOUBLE)*n_samples),1,
+                                <DOUBLE*>(RG.data),1)
+            #with gil:
+            #    grad = -np.dot(X.T,RG)
+            
             for ind in range(n_features):
                 w_ii = w[ind]
                 tmp = w[ind] - (step)*grad[ind]
                 w[ind] = (fsign(tmp) * fmax(fabs(tmp) - (alpha*step), 0))
                 d_w_max = fmax(d_w_max,fabs(w_ii-w[ind]))
-
+                if fabs(w[ind]) > w_max :
+                    w_max = fabs(w[ind])
             
-            if d_w_max < d_w_tol:
+            if d_w_max / w_max < d_w_tol:
                 gap = 0
                 #break
             
