@@ -430,6 +430,7 @@ def lts_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
             score = lts_score(1.0-percentage)(X,y[:,np.newaxis],coef_[np.newaxis,:,np.newaxis],inter,np.dot(X,lasso.coef_)[:,np.newaxis,np.newaxis])
 
             if(score < best_score):
+                best_score = score
                 best_coef_ = coef_
                 best_dual_gap_ = dual_gap_
                 best_n_iter_ = n_iter_
