@@ -24,4 +24,4 @@ cdef double tddot_index(int N, double * X1, int incx, double * X2, int incy, int
 
 cdef double ptddot(int N, double * X1, int incx, double * X2, int incy, int NT, int * iarray = *) nogil
 
-cdef void trimm(int N, double * X, int incx, int NT) nogil
+cdef void trimm(int N, double * X, int incx, int NT, double substitut = *) nogil

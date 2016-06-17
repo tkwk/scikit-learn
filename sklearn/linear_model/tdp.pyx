@@ -7,6 +7,7 @@ from numpy import linalg
 import math
 from libc.stdlib cimport malloc, free
 from libc.stdlib cimport qsort
+import copy
 
 cdef double * Hbuffer = NULL
 cdef int * Hind = NULL
@@ -58,7 +59,7 @@ cdef int compare_doubles(const void * x, const void * y) nogil:
         return 1
     return 0
 
-cdef void trimm(int N, double * X, int incx, int NT) nogil:
+cdef void trimm(int N, double * X, int incx, int NT, double substitut = 0.0) nogil:
     global Hbuffer, Hsize, Hind
 #on ajuste la taille du buffer si necessaire
     if(NT > Hsize):
@@ -125,28 +126,28 @@ cdef void trimm(int N, double * X, int incx, int NT) nogil:
         if(count >= cpNT or i!=Hindex[count]):
             pass
         else:
-            X[i*incx] = 0.0
+            X[i*incx] = substitut
             count += 1
 
 
-cdef double oldptddot(int N, double * X1, int incx, double * X2, int incy, int NT) nogil:
-    global Hbuffer, Hsize
+#cdef double oldptddot(int N, double * X1, int incx, double * X2, int incy, int NT) nogil:
+#    global Hbuffer, Hsize
 #on ajuste la taille du buffer si necessaire
-    if(N > Hsize):
-        if(Hbuffer != NULL):
-            free(Hbuffer)
-        Hbuffer = <double *> malloc(sizeof(double)*N)
-    cdef int i
-    cdef double dot = 0.0
-    for i in range(N):
-        Hbuffer[i] = X1[i*incx]*X2[i*incy]
+#    if(N > Hsize):
+#        if(Hbuffer != NULL):
+#            free(Hbuffer)
+#        Hbuffer = <double *> malloc(sizeof(double)*N)
+#    cdef int i
+#    cdef double dot = 0.0
+#    for i in range(N):
+#        Hbuffer[i] = X1[i*incx]*X2[i*incy]
 
-    qsort(Hbuffer, N, sizeof(double), compare_doubles)
+#    qsort(Hbuffer, N, sizeof(double), compare_doubles)
 
-    for i in range(N-NT):
-        dot += Hbuffer[i]
+#    for i in range(N-NT):
+#        dot += Hbuffer[i]
 
-    return dot
+#    return dot
 
 cdef double ptddot(int N, double * X1, int incx, double * X2, int incy, int NT, int * iarray = NULL) nogil:
     global Hbuffer, Hsize, Hind
@@ -223,27 +224,38 @@ cdef double ptddot(int N, double * X1, int incx, double * X2, int incy, int NT, 
     return dot
 
     
-def trimmaux(cnp.ndarray[double,ndim=1] X, int NT):
-    trimm(X.shape[0],<double *> X.data, 1, NT)
+def trimmaux(cnp.ndarray[double,ndim=1] X, int NT, double substitut = 0.0):
+    trimm(X.shape[0],<double *> X.data, 1, NT, substitut)
 
-def trimmed(X,NT):
+def replaced(X,NT,substitut=0.0):
+    Xcp = copy.deepcopy(X)
+    Xcp = replace(Xcp,NT,substitut=substitut)
+    return Xcp
+
+
+def replace(X,NT,substitut=0.0):
+    sub = substitut
     if(len(X.shape)==1):
-        trimmaux(X,NT)
+        if substitut == "median":
+            sub = np.median(X)
+        trimmaux(X,NT,substitut=sub)
     else:
         X=np.asfortranarray(X)
         for col in range(X.shape[1]):
-            X[:,col] = trimmed(X[:,col],NT)
+            if substitut == "median":
+                sub = np.median(X[:,col])
+            X[:,col] = replace(X[:,col],NT,substitut=sub)
     return X
 
 #return an estimation of the non-corrupted norm
 def tnorm(X,NT):
     N = X.shape[0]
-    return ((N-NT)/N)*linalg.norm(trimmed(X,NT))
+    return ((N-NT)/N)*linalg.norm(replaced(X,NT))
 
 #return an estimation of the non-corrupted mean
 def tmean(X,NT):
     N = X.shape[0]
-    return ((N-NT)/N)*np.mean(trimmed(X,NT))
+    return ((N-NT)/N)*np.mean(replaced(X,NT))
 
 def tdot(X1,X2,NT):
 #dans le cas ou X2 et à une dimension on le passe en 2D (colonne)
@@ -283,7 +295,6 @@ def tdot(X1,X2,NT):
     return Res
 
 def tdotaux(cnp.ndarray[double,ndim=2,mode='c'] X1, cnp.ndarray[double,ndim=2,mode='fortran'] X2, int NT):
-
     s1 = X1.shape
     s2 = X2.shape
 
