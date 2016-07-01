@@ -262,7 +262,14 @@ def lasso_path(X, y, eps=1e-3, n_alphas=100, alphas=None,
                      positive=positive, return_n_iter=return_n_iter, **params)
 
 
+'''
+Following are utility functions for the SparseLTS Algorithm
+'''
+
 def C_step(X,Y,H,alpha):
+'''
+Performs a concentration step, i.e. a standard Lasso on the subset of observations H
+'''
     lasso = Lasso(alpha=alpha)
     n = X.shape[0]
     h = H.shape[0]
@@ -277,6 +284,9 @@ def C_step(X,Y,H,alpha):
 
 
 def residuals(X,Y,beta):
+'''
+Compute the residual of each observation
+'''
     n = X.shape[0]
     res2 = np.zeros((n))
     pred = np.dot(X,beta)
@@ -294,6 +304,9 @@ def indexofklargest(tab,k):
 
 def lts_score(h):
     def this_score(X,Y,beta,intercept,xtimecoef):
+    '''
+    Return the residual corresponding to the h better observations
+    '''
         n_alphas = beta.shape[2]
         res = np.zeros((n_alphas))
         nh = int((1.0-h)*Y.shape[0])
@@ -312,11 +325,9 @@ def lts_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
               precompute='auto', Xy=None, copy_X=True, coef_init=None,
               verbose=False, return_n_iter=False, positive=False,
               check_input=True, NT=0.0, **params):
-    """ Sparse LTS algorithm
-    """
-    
-
-##############################################
+""" 
+Perform the Sparse LTS algorithm
+"""
     # We expect X and y to be already float64 Fortran ordered when bypassing
     # checks
     if check_input:
@@ -451,13 +462,12 @@ def lts_path(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
     return alphas, coefs, dual_gaps
 
 
-##############################################
-
 def enet_path_trimmed_Q(X, y, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
               precompute='auto', Xy=None, copy_X=True, coef_init=None,
               verbose=False, return_n_iter=False, positive=False,
               check_input=True, NT=0.0, **params):
-    """ compute X^t X and X^t y with NT-trimmed dot product, then proceed to standard enet_path
+    """ 
+    Compute X^t X and X^t y with NT-trimmed dot product, then proceed to standard enet_path
     """
     NT = int(NT*X.shape[0])
     q = tdp.tdot(X.T,y,NT)
@@ -1130,6 +1140,14 @@ class Lasso(ElasticNet):
 # Trimmed lasso class
 
 class TrimmedLasso(Lasso):
+'''
+Optimisation objective: (1/(2*n_samples)) * w^t Q_NT w + alpha * ||w||_1
+Where Q_NT = <X^t,X>_NT (NT-trimmed dot product)
+
+    trimmed : percentage of trimmed terms in the dot product
+    pre_trimmed : True or False, whether we want to trimm the Gramm Matrix, project it, and use standard Lasso,
+                                or use the second algorithm
+'''
 
     def __init__(self, alpha=1.0, fit_intercept=True, normalize=False,
                  precompute=False, copy_X=True, max_iter=1000,
@@ -1156,7 +1174,18 @@ class TrimmedLasso(Lasso):
 # Sparse lts class
 
 class SparseLTS(ElasticNet):
+'''
+Optimisation objective: Q(H_opt,w)
+where:
+    Q(H,beta) = (1/(2*|H|)) * ||y - Xw||^2_2 + alpha * ||w||_1
+    beta_H = argmin Q(H,beta)
+    
+    H_opt = argmin Q(H,beta_H)
 
+Intuitively, we search a subset of observations H_opt corresponding to the non-corrupted data (with |Hopt| = n_sample * (1.0-trimmed))
+
+    trimmed : percentage of observation to be excluded from the set H. |Hopt| = n_sample * (1.0-trimmed)
+'''
     def __init__(self, alpha=1.0, fit_intercept=True, normalize=False,
                  precompute=False, copy_X=True, max_iter=1000,
                  tol=1e-4, warm_start=False, positive=False,
@@ -1171,8 +1200,12 @@ class SparseLTS(ElasticNet):
         self.path = lambda *p, **pp : lts_path(*p, **pp, NT=self.trimmed)
 
 ###############################################################################
-# MD-Lasso lts class
+# MD-Lasso class
+'''
+Optimisation objective: -(c/n_sample) log(\sum_i exp(-(1/2c) * (Y_i - X_i w)^2)) + alpha * ||w||_1
 
+    c : parameter for the algorithm
+'''
 class MDLasso(ElasticNet):
 
     def __init__(self, alpha=1.0, fit_intercept=True, normalize=False,

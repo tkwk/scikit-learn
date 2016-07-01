@@ -9,11 +9,13 @@ from libc.stdlib cimport malloc, free
 from libc.stdlib cimport qsort
 import copy
 
+#global memory: we allocate a buffer the first time, and keep it (if the size must change we re-allocate it)
 cdef double * Hbuffer = NULL
 cdef int * Hind = NULL
 cdef int Hsize = 0
 cdef int gNT = 0
 
+#utilitary functions
 cdef inline double vabs(double x) nogil:
     if(x>=0):
         return x
@@ -32,12 +34,25 @@ cdef void int_insert(int * H, int index, int value) nogil:
     H[index] = value
 
 cdef double cvtdot(double * X1, double * X2, int N, int NT) nogil:
+    '''
+    performs a NT-trimmed dot product between to array
+    data in X1 and X2 must be spaced by 1*sizeof(double) bytes
+    '''
     return ptddot(N,X1,1,X2,1,NT)
 
 cdef double tddot(int N, double * X1, int incx, double * X2, int incy) nogil:
+    '''
+    performs a NT-trimmed dot product between to array
+    data in X1 and X2 must be spaced by incx*sizeof(double) and incy*sizeof(double) bytes respectively
+    '''
     return ptddot(N,X1,incx,X2,incy,gNT)
 
 cdef double tddot_index(int N, double * X1, int incx, double * X2, int incy, int * index) nogil:
+    '''
+    performs a NT-trimmed dot product between to array
+    data in X1 and X2 must be spaced by incx*sizeof(double) and incy*sizeof(double) bytes respectively
+    The indexes of trimmed terms are stored in index (which must be an array of size NT)
+    '''
     return ptddot(N,X1,incx,X2,incy,gNT,index)
 
 cdef int compare_ints(const void * x, const void * y) nogil:
@@ -46,7 +61,6 @@ cdef int compare_ints(const void * x, const void * y) nogil:
     elif(((<int *>x)[0]) > ((<int *>y)[0])):
         return 1
     return 0
-
 
 cdef int compare_doubles(const void * x, const void * y) nogil:
     if(not isfinite((<double *>x)[0])):
@@ -59,7 +73,13 @@ cdef int compare_doubles(const void * x, const void * y) nogil:
         return 1
     return 0
 
+
+
+
 cdef void trimm(int N, double * X, int incx, int NT, double substitut = 0.0) nogil:
+    '''
+    Trimm the NT greatest values (in absolute value) of the vector X, replacing them by substitut
+    '''
     global Hbuffer, Hsize, Hind
 #on ajuste la taille du buffer si necessaire
     if(NT > Hsize):
@@ -130,26 +150,10 @@ cdef void trimm(int N, double * X, int incx, int NT, double substitut = 0.0) nog
             count += 1
 
 
-#cdef double oldptddot(int N, double * X1, int incx, double * X2, int incy, int NT) nogil:
-#    global Hbuffer, Hsize
-#on ajuste la taille du buffer si necessaire
-#    if(N > Hsize):
-#        if(Hbuffer != NULL):
-#            free(Hbuffer)
-#        Hbuffer = <double *> malloc(sizeof(double)*N)
-#    cdef int i
-#    cdef double dot = 0.0
-#    for i in range(N):
-#        Hbuffer[i] = X1[i*incx]*X2[i*incy]
-
-#    qsort(Hbuffer, N, sizeof(double), compare_doubles)
-
-#    for i in range(N-NT):
-#        dot += Hbuffer[i]
-
-#    return dot
-
 cdef double ptddot(int N, double * X1, int incx, double * X2, int incy, int NT, int * iarray = NULL) nogil:
+    '''
+    Return the NT-trimmed dot product of vectors X1 and X2
+    '''
     global Hbuffer, Hsize, Hind
 #on ajuste la taille du buffer si necessaire
     if(NT > Hsize):
@@ -223,17 +227,30 @@ cdef double ptddot(int N, double * X1, int incx, double * X2, int incy, int NT, 
     
     return dot
 
-    
+
+'''
+Python interfaces
+'''
+
 def trimmaux(cnp.ndarray[double,ndim=1] X, int NT, double substitut = 0.0):
+    '''
+    take a 1D python array and replace its NT greatest absolute values by substitut
+    '''
     trimm(X.shape[0],<double *> X.data, 1, NT, substitut)
 
 def replaced(X,NT,substitut=0.0):
+    '''
+    Take a Python array and return a trimmed version of it
+    '''
     Xcp = copy.deepcopy(X)
     Xcp = replace(Xcp,NT,substitut=substitut)
     return Xcp
 
 
 def replace(X,NT,substitut=0.0):
+    '''
+    Take a Python array and trimm it
+    '''
     sub = substitut
     if(len(X.shape)==1):
         if substitut == "median":
@@ -247,21 +264,24 @@ def replace(X,NT,substitut=0.0):
             X[:,col] = replace(X[:,col],NT,substitut=sub)
     return X
 
-#return an estimation of the non-corrupted norm
 def tnorm(X,NT):
+    '''
+    return an estimation of the non-corrupted norm
+    '''
     N = X.shape[0]
-    return ((N-NT)/N)*linalg.norm(replaced(X,NT))
+    return ((N)/(N-NT))*linalg.norm(replaced(X,NT))
 
-#return an estimation of the non-corrupted mean
 def tmean(X,NT):
+    '''
+    return an estimation of the non-corrupted mean
+    '''
     N = X.shape[0]
-    return ((N-NT)/N)*np.mean(replaced(X,NT))
+    return ((N)/(N-NT))*np.mean(replaced(X,NT))
 
 def tdot(X1,X2,NT):
-#dans le cas ou X2 et à une dimension on le passe en 2D (colonne)
-#dans le cas ou X1 et à une dimension on le passe en 2D (line)
-#on fait le produit
-#on renvoie un array
+    '''
+    Perform a NT-trimmed dot product between two Python array
+    '''
     TX2=X2
     TX1=X1
     if(len(X2.shape)==1):
@@ -295,6 +315,9 @@ def tdot(X1,X2,NT):
     return Res
 
 def tdotaux(cnp.ndarray[double,ndim=2,mode='c'] X1, cnp.ndarray[double,ndim=2,mode='fortran'] X2, int NT):
+    '''
+    Auxilary function for tdot
+    '''
     s1 = X1.shape
     s2 = X2.shape
 
@@ -319,17 +342,18 @@ def tdotaux(cnp.ndarray[double,ndim=2,mode='c'] X1, cnp.ndarray[double,ndim=2,mo
             Res[i][j] = cvtdot(<double *>(X1.data + col1*i*sizeof(double)),<double *>(X2.data + col1*j*sizeof(double)),col1,NT)
     return Res
 
-def project(M,eps):
+def project(M,eps=0.01,verbose=False):
+    '''
+    Project a Matrix M on SDP Matrices, replacing it's negative eigenvalues by epsilon
+    '''
     W, V = linalg.eigh(M)
-#le: valeur par laquelle on remplace les vp negatives de M
-    eps = 0.1
     _p_ = False
     for i in range(len(W)):
         if(W[i] < 0):
             W[i] = eps
             _p_ = True
     M = np.dot(np.dot(V,np.diag(W)),V.T)
-    if _p_:
+    if _p_ and verbose:
         print("singular matrix projected")
     return M
 
