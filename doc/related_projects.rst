@@ -12,6 +12,12 @@ Interoperability and framework enhancements
 These tools adapt scikit-learn for use with other technologies or otherwise
 enhance the functionality of scikit-learn's estimators.
 
+- `ML Frontend <https://github.com/jeff1evesque/machine-learning>`_ provides
+  dataset management and SVM fitting/prediction through
+  `web-based <https://github.com/jeff1evesque/machine-learning#web-interface>`_
+  and `programmatic <https://github.com/jeff1evesque/machine-learning#programmatic-interface>`_
+  interfaces.
+
 - `sklearn_pandas <https://github.com/paulgb/sklearn-pandas/>`_ bridge for
   scikit-learn pipelines and pandas data frame with dedicated transformers.
 
@@ -23,6 +29,12 @@ enhance the functionality of scikit-learn's estimators.
 - `auto-sklearn <https://github.com/automl/auto-sklearn/blob/master/source/index.rst>`_
   An automated machine learning toolkit and a drop-in replacement for a
   scikit-learn estimator
+
+- `TPOT <https://github.com/rhiever/tpot>`_
+  An automated machine learning toolkit that optimizes a series of scikit-learn
+  operators to design a machine learning pipeline, including data and feature
+  preprocessors as well as the estimators. Works as a drop-in replacement for a
+  scikit-learn estimator.
 
 - `sklearn-pmml <https://github.com/alex-pirozhenko/sklearn-pmml>`_
   Serialization of (some) scikit-learn estimators into PMML.

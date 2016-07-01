@@ -9,7 +9,7 @@ classification estimators.
 # Authors: Sebastian Raschka <se.raschka@gmail.com>,
 #          Gilles Louppe <g.louppe@gmail.com>
 #
-# Licence: BSD 3 clause
+# License: BSD 3 clause
 
 import numpy as np
 
@@ -61,7 +61,7 @@ class VotingClassifier(BaseEstimator, ClassifierMixin, TransformerMixin):
     >>> import numpy as np
     >>> from sklearn.linear_model import LogisticRegression
     >>> from sklearn.naive_bayes import GaussianNB
-    >>> from sklearn.ensemble import RandomForestClassifier
+    >>> from sklearn.ensemble import RandomForestClassifier, VotingClassifier
     >>> clf1 = LogisticRegression(random_state=1)
     >>> clf2 = RandomForestClassifier(random_state=1)
     >>> clf3 = GaussianNB()

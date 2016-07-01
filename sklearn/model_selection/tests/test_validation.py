@@ -3,6 +3,9 @@ from __future__ import division
 
 import sys
 import warnings
+import tempfile
+import os
+from time import sleep
 
 import numpy as np
 from scipy.sparse import coo_matrix, csr_matrix
@@ -41,7 +44,7 @@ from sklearn.metrics import explained_variance_score
 from sklearn.metrics import make_scorer
 from sklearn.metrics import precision_score
 
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import Ridge, LogisticRegression
 from sklearn.linear_model import PassiveAggressiveClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
@@ -53,10 +56,17 @@ from sklearn.pipeline import Pipeline
 from sklearn.externals.six.moves import cStringIO as StringIO
 from sklearn.base import BaseEstimator
 from sklearn.multiclass import OneVsRestClassifier
+from sklearn.utils import shuffle
 from sklearn.datasets import make_classification
 from sklearn.datasets import make_multilabel_classification
 
-from test_split import MockClassifier
+from sklearn.model_selection.tests.test_split import MockClassifier
+
+
+try:
+    WindowsError
+except NameError:
+    WindowsError = None
 
 
 class MockImprovingEstimator(BaseEstimator):
@@ -378,8 +388,8 @@ def test_permutation_score():
 
     # test with custom scoring object
     def custom_score(y_true, y_pred):
-        return (((y_true == y_pred).sum() - (y_true != y_pred).sum())
-                / y_true.shape[0])
+        return (((y_true == y_pred).sum() - (y_true != y_pred).sum()) /
+                y_true.shape[0])
 
     scorer = make_scorer(custom_score)
     score, _, pvalue = permutation_test_score(
@@ -740,3 +750,58 @@ def test_cross_val_predict_sparse_prediction():
     preds_sparse = cross_val_predict(classif, X_sparse, y_sparse, cv=10)
     preds_sparse = preds_sparse.toarray()
     assert_array_almost_equal(preds_sparse, preds)
+
+
+def test_cross_val_predict_with_method():
+    iris = load_iris()
+    X, y = iris.data, iris.target
+    X, y = shuffle(X, y, random_state=0)
+    classes = len(set(y))
+
+    kfold = KFold(len(iris.target))
+
+    methods = ['decision_function', 'predict_proba', 'predict_log_proba']
+    for method in methods:
+        est = LogisticRegression()
+
+        predictions = cross_val_predict(est, X, y, method=method)
+        assert_equal(len(predictions), len(y))
+
+        expected_predictions = np.zeros([len(y), classes])
+        func = getattr(est, method)
+
+        # Naive loop (should be same as cross_val_predict):
+        for train, test in kfold.split(X, y):
+            est.fit(X[train], y[train])
+            expected_predictions[test] = func(X[test])
+
+        predictions = cross_val_predict(est, X, y, method=method,
+                                        cv=kfold)
+        assert_array_almost_equal(expected_predictions, predictions)
+
+
+def test_score_memmap():
+    # Ensure a scalar score of memmap type is accepted
+    iris = load_iris()
+    X, y = iris.data, iris.target
+    clf = MockClassifier()
+    tf = tempfile.NamedTemporaryFile(mode='wb', delete=False)
+    tf.write(b'Hello world!!!!!')
+    tf.close()
+    scores = np.memmap(tf.name, dtype=np.float64)
+    score = np.memmap(tf.name, shape=(), mode='r', dtype=np.float64)
+    try:
+        cross_val_score(clf, X, y, scoring=lambda est, X, y: score)
+        # non-scalar should still fail
+        assert_raises(ValueError, cross_val_score, clf, X, y,
+                      scoring=lambda est, X, y: scores)
+    finally:
+        # Best effort to release the mmap file handles before deleting the
+        # backing file under Windows
+        scores, score = None, None
+        for _ in range(3):
+            try:
+                os.unlink(tf.name)
+                break
+            except WindowsError:
+                sleep(1.)

@@ -6,7 +6,7 @@ from ..base import BaseEstimator, RegressorMixin
 from ..linear_model.base import LinearClassifierMixin, SparseCoefMixin, \
     LinearModel
 from ..feature_selection.from_model import _LearntSelectorMixin
-from ..utils import check_X_y
+from ..utils import check_X_y, column_or_1d
 from ..utils.validation import _num_samples
 from ..utils.multiclass import check_classification_targets
 
@@ -329,7 +329,7 @@ class LinearSVR(LinearModel, RegressorMixin):
         self.dual = dual
         self.loss = loss
 
-    def fit(self, X, y):
+    def fit(self, X, y, sample_weight=None):
         """Fit the model according to the given training data.
 
         Parameters
@@ -374,7 +374,7 @@ class LinearSVR(LinearModel, RegressorMixin):
             X, y, self.C, self.fit_intercept, self.intercept_scaling,
             None, penalty, self.dual, self.verbose,
             self.max_iter, self.tol, self.random_state, loss=self.loss,
-            epsilon=self.epsilon)
+            epsilon=self.epsilon, sample_weight=sample_weight)
         self.coef_ = self.coef_.ravel()
 
         return self
@@ -588,12 +588,12 @@ class NuSVC(BaseSVC):
     cache_size : float, optional
         Specify the size of the kernel cache (in MB).
 
-    class_weight : {dict, 'auto'}, optional
+    class_weight : {dict, 'balanced'}, optional
         Set the parameter C of class i to class_weight[i]*C for
         SVC. If not given, all classes are supposed to have
-        weight one. The 'auto' mode uses the values of y to
-        automatically adjust weights inversely proportional to
-        class frequencies.
+        weight one. The "balanced" mode uses the values of y to automatically adjust
+        weights inversely proportional to class frequencies as
+        ``n_samples / (n_classes * np.bincount(y))``
 
     verbose : bool, default: False
         Enable verbose output. Note that this setting takes advantage of a
@@ -765,6 +765,9 @@ class SVR(BaseLibSVM, RegressorMixin):
 
     intercept_ : array, shape = [1]
         Constants in decision function.
+
+    sample_weight : array-like, shape = [n_samples]
+            Individual weights for each sample
 
     Examples
     --------
